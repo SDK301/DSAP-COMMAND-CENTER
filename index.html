@@ -792,7 +792,7 @@ footer{margin-top:50px;padding-top:20px;border-top:1px solid var(--line);font-fa
 
   <div class="band b-time"><div><div class="bl">02 · Timing</div><h2>When to shoot what</h2></div><div class="bs">Altitude of the moon, planets and your best targets across the night</div></div>
   <div class="panel" style="margin-bottom:14px">
-    <h3>Visibility timeline — sunset to sunrise
+    <h3>Visibility timeline — <span id="tl-title">sunset to sunrise</span>
       <span class="legend">
         <span><i style="background:var(--tl-prime)"></i>Prime &gt;40°</span>
         <span><i style="background:var(--tl-good)"></i>Good 20–40°</span>
@@ -1666,9 +1666,25 @@ let tlExpanded=false;
 function toggleTimeline(){ tlExpanded=!tlExpanded; drawTimeline(); }
 
 function drawTimeline(){
-  const w=nightWindow(when);
-  if(!w.sunset||!w.sunrise) return;
-  const t0=w.sunset.getTime(), t1=w.sunrise.getTime(), N=48;
+  /* Day mode: if the selected moment is during daylight, plot that day's
+     sunrise -> sunset so the Sun shows as a real daytime arc. Otherwise plot
+     the observing night (sunset -> sunrise) as before. */
+  const dayMode=bodyAlt('Sun',when).altitude>0;
+  let t0,t1,label;
+  if(dayMode){
+    const o=obs();
+    const anchor=new Date(when); anchor.setHours(0,0,0,0);
+    const sr=Astronomy.SearchRiseSet('Sun',o,+1,anchor,1);
+    const ss=sr?Astronomy.SearchRiseSet('Sun',o,-1,sr.date,1):null;
+    if(!sr||!ss) return;
+    t0=sr.date.getTime(); t1=ss.date.getTime(); label='sunrise to sunset';
+  } else {
+    const w=nightWindow(when);
+    if(!w.sunset||!w.sunrise) return;
+    t0=w.sunset.getTime(); t1=w.sunrise.getTime(); label='sunset to sunrise';
+  }
+  const tt=document.getElementById('tl-title'); if(tt) tt.textContent=label;
+  const N=48;
   const times=[]; for(let i=0;i<N;i++) times.push(new Date(t0+(t1-t0)*(i+0.5)/N));
 
   const hh=document.getElementById('tl-hours'); hh.innerHTML='';
@@ -1695,20 +1711,28 @@ function drawTimeline(){
     alts.forEach(a=>{
       let c='transparent';
       if(opts.moon){ c=a>0?'var(--tl-moon)':'transparent'; }
+      else if(opts.sun){
+        if(a>40)c='var(--tl-prime)'; else if(a>20)c='var(--tl-good)'; else if(a>0)c='var(--tl-low)';
+        else if(a>-18)c='var(--warn)'; else c='transparent';   /* up: altitude bands · down: amber twilight → dark */
+      }
       else if(a>40)c='var(--tl-prime)'; else if(a>20)c='var(--tl-good)'; else if(a>0)c='var(--tl-low)';
       segs+=`<div class="tl-seg" style="background:${c}"></div>`;
     });
     const peak=Math.max(...alts);
     const d=document.createElement('div');
     d.className='tl-row'+(opts.moon?' moonrow':'');
+    const ttl=opts.title||`${name} — peaks at ${peak.toFixed(0)}\u00b0`;
     d.innerHTML=`<div class="tl-name" title="${name}">${name}${sub?` <span class="sm">${sub}</span>`:''}</div>`
-      +`<div class="tl-track" title="${name} — peaks at ${peak.toFixed(0)}\u00b0">${segs}</div>`;
+      +`<div class="tl-track" title="${ttl}">${segs}</div>`;
     body.appendChild(d);
   };
 
   /* --- context: moon and planets, kept visually quieter --- */
   groupHead('Moon &amp; planets');
   addRow('Moon','',times.map(t=>bodyAlt('Moon',t).altitude),{moon:true});
+  addRow('Sun',dayMode?'':'twilight',times.map(t=>bodyAlt('Sun',t).altitude),
+         dayMode?{sun:true}
+                :{sun:true,title:'Sun \u2014 amber marks twilight (within 18\u00b0 of the horizon); the empty gap is your astronomical-dark window'});
   PLANETS.forEach(p=>{
     const a=times.map(t=>bodyAlt(p,t).altitude);
     if(Math.max(...a)>0) addRow(p,'planet',a);
