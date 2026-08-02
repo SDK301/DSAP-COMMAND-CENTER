@@ -1067,22 +1067,65 @@ let fstate={targets:{type:'',rig:'',status:'',q:'',season:false,sort:'alt',month
    does not, so we fall back to localStorage — same keys, same JSON, no other changes. */
 const HAS_CLAUDE_STORAGE = (typeof window!=='undefined' && window.storage
                             && typeof window.storage.get==='function');
+/* Cookie mirror: some environments (embedded iframes, third-party storage
+   partitioning, a few hosted setups) silently block localStorage, which used to
+   make the target list — including added hidden gems — disappear on every reopen.
+   We mirror the small critical keys to a cookie so they survive when localStorage
+   won't hold them. Big keys (image cache, logs) are skipped — cookies are ~4KB. */
+const COOKIE_KEYS=new Set(['dsap-added','dsap-theme','dsap-status','dsap-sessions']);
+function cookieSet(k,val){
+  try{
+    if(val.length>3500) return;      /* too big for a cookie — localStorage only */
+    const exp=new Date(Date.now()+400*864e5).toUTCString();
+    document.cookie=encodeURIComponent(k)+'='+encodeURIComponent(val)
+      +';expires='+exp+';path=/;SameSite=Lax';
+  }catch(e){}
+}
+function cookieGet(k){
+  try{
+    const pre=encodeURIComponent(k)+'=';
+    for(const c of document.cookie.split(';')){
+      const s=c.trim();
+      if(s.indexOf(pre)===0) return decodeURIComponent(s.slice(pre.length));
+    }
+  }catch(e){}
+  return null;
+}
 async function sget(k,d){
   try{
     if(HAS_CLAUDE_STORAGE){ const r=await window.storage.get(k); return r?JSON.parse(r.value):d; }
-    const v=localStorage.getItem(k); return v===null?d:JSON.parse(v);
+    let v=null;
+    try{ v=localStorage.getItem(k); }catch(e){}
+    if(v===null && COOKIE_KEYS.has(k)) v=cookieGet(k);   /* localStorage blocked → fall back to cookie */
+    return v===null?d:JSON.parse(v);
   }catch(e){ return d; }
 }
 let STORAGE_OK=true;
 function checkStorage(){
   if(HAS_CLAUDE_STORAGE) return true;
-  try{ localStorage.setItem('dsap-probe','1'); localStorage.removeItem('dsap-probe'); return true; }
-  catch(e){ return false; }          /* sandboxed iframe without same-origin access */
+  /* True round-trip: write, read back, compare. A silent no-op write (some
+     sandboxes accept setItem but never persist) must count as a failure. */
+  try{
+    const probe='dsap-probe-'+Date.now();
+    localStorage.setItem(probe,'1');
+    const ok=localStorage.getItem(probe)==='1';
+    localStorage.removeItem(probe);
+    if(ok) return true;
+  }catch(e){}
+  return cookieProbe();          /* localStorage unusable — is the cookie fallback alive? */
+}
+function cookieProbe(){
+  try{
+    document.cookie='dsap-cprobe=1;path=/;SameSite=Lax';
+    return document.cookie.indexOf('dsap-cprobe=1')!==-1;
+  }catch(e){ return false; }
 }
 async function sset(k,v){
+  const s=JSON.stringify(v);
   try{
-    if(HAS_CLAUDE_STORAGE){ await window.storage.set(k,JSON.stringify(v)); return; }
-    localStorage.setItem(k,JSON.stringify(v));
+    if(HAS_CLAUDE_STORAGE){ await window.storage.set(k,s); return; }
+    try{ localStorage.setItem(k,s); }catch(e){}
+    if(COOKIE_KEYS.has(k)) cookieSet(k,s);   /* mirror small critical keys */
   }catch(e){}
 }
 
@@ -1601,6 +1644,8 @@ function drawPlanets(){
   });
   const mh=bodyAlt('Moon',when);
   rows.push({n:'Moon',alt:mh.altitude,az:mh.azimuth,mag:Astronomy.Illumination('Moon',when).mag.toFixed(1)});
+  const sh=bodyAlt('Sun',when);
+  rows.push({n:'Sun',alt:sh.altitude,az:sh.azimuth,mag:'\u221226.7'});
   rows.sort((a,b)=>b.alt-a.alt);
   rows.forEach(r=>{
     let col,txt;
@@ -1666,7 +1711,7 @@ function drawTimeline(){
   addRow('Moon','',times.map(t=>bodyAlt('Moon',t).altitude),{moon:true});
   PLANETS.forEach(p=>{
     const a=times.map(t=>bodyAlt(p,t).altitude);
-    if(Math.max(...a)>15) addRow(p,'planet',a);
+    if(Math.max(...a)>0) addRow(p,'planet',a);
   });
 
   /* --- your targets, best first --- */
