@@ -1672,23 +1672,13 @@ let tlExpanded=false;
 function toggleTimeline(){ tlExpanded=!tlExpanded; drawTimeline(); }
 
 function drawTimeline(){
-  /* Day mode: if the selected moment is during daylight, plot that day's
-     sunrise -> sunset so the Sun shows as a real daytime arc. Otherwise plot
-     the observing night (sunset -> sunrise) as before. */
-  const dayMode=bodyAlt('Sun',when).altitude>0;
-  let t0,t1,label;
-  if(dayMode){
-    const o=obs();
-    const anchor=new Date(when); anchor.setHours(0,0,0,0);
-    const sr=Astronomy.SearchRiseSet('Sun',o,+1,anchor,1);
-    const ss=sr?Astronomy.SearchRiseSet('Sun',o,-1,sr.date,1):null;
-    if(!sr||!ss) return;
-    t0=sr.date.getTime(); t1=ss.date.getTime(); label='sunrise to sunset';
-  } else {
-    const w=nightWindow(when);
-    if(!w.sunset||!w.sunrise) return;
-    t0=w.sunset.getTime(); t1=w.sunrise.getTime(); label='sunset to sunrise';
-  }
+  /* Always plot the observing night (sunset -> sunrise). This is a deep-sky
+     planner, so the useful window is the night even when the app is opened in
+     daylight. nightWindow() returns tonight's window from the afternoon/evening,
+     and the just-passed night in the early morning. */
+  const w=nightWindow(when);
+  if(!w.sunset||!w.sunrise) return;
+  const t0=w.sunset.getTime(), t1=w.sunrise.getTime(), label='sunset to sunrise';
   const tt=document.getElementById('tl-title'); if(tt) tt.textContent=label;
   const N=48;
   const times=[]; for(let i=0;i<N;i++) times.push(new Date(t0+(t1-t0)*(i+0.5)/N));
@@ -1736,9 +1726,8 @@ function drawTimeline(){
   /* --- context: moon and planets, kept visually quieter --- */
   groupHead('Moon &amp; planets');
   addRow('Moon','',times.map(t=>bodyAlt('Moon',t).altitude),{moon:true});
-  addRow('Sun',dayMode?'':'twilight',times.map(t=>bodyAlt('Sun',t).altitude),
-         dayMode?{sun:true}
-                :{sun:true,title:'Sun \u2014 amber marks twilight (within 18\u00b0 of the horizon); the empty gap is your astronomical-dark window'});
+  addRow('Sun','twilight',times.map(t=>bodyAlt('Sun',t).altitude),
+         {sun:true,title:'Sun \u2014 amber marks twilight (within 18\u00b0 of the horizon); the empty gap is your astronomical-dark window'});
   PLANETS.forEach(p=>{
     const a=times.map(t=>bodyAlt(p,t).altitude);
     if(Math.max(...a)>0) addRow(p,'planet',a);
